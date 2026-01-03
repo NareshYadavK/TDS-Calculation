@@ -1,0 +1,5 @@
+{
+  "name": "TDS Calculator (Income Tax Act 2025)",
+  "description": "An application to calculate Tax Deducted at Source (TDS) based on the provisions of Section 393 of the Income Tax Act, 2025. Users can select a payment type, enter an amount, and view the calculated TDS, applicable rate, and threshold limits.",
+  "requestFramePermissions": []
+}
