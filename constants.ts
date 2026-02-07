@@ -340,7 +340,7 @@ export const TDS_RULES: TdsRule[] = [
   },
 
   // ===================================
-  // NON-RESIDENT PAYEES (From Image 2)
+  // NON-RESIDENT PAYEES (From Images)
   // ===================================
   {
     id: 'nr_194E_sports',
@@ -350,6 +350,17 @@ export const TDS_RULES: TdsRule[] = [
     rate: 20,
     rateUnit: '%',
     threshold: 0,
+    payeeType: 'non-resident',
+    payerType: 'all',
+  },
+  {
+    id: 'nr_194N_cash',
+    category: 'Cash Withdrawal',
+    description: 'Cash withdrawal in excess of 1 crore (Legacy 194N)',
+    reference: 'Sec 194N',
+    rate: 2,
+    rateUnit: '%',
+    threshold: 10000000,
     payeeType: 'non-resident',
     payerType: 'all',
   },
