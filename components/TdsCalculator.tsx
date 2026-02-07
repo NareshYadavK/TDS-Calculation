@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TDS_RULES } from '../constants';
 import { CalculationResult, TdsRule } from '../types';
 import ResultCard from './ResultCard';
@@ -6,220 +6,250 @@ import ResultCard from './ResultCard';
 const TdsCalculator: React.FC = () => {
   const [payeeStatus, setPayeeStatus] = useState<'resident' | 'non-resident'>('resident');
   const [payerCategory, setPayerCategory] = useState<'specified' | 'non-specified'>('specified');
+  const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedRuleId, setSelectedRuleId] = useState<string>('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [amount, setAmount] = useState<string>('');
   const [result, setResult] = useState<CalculationResult | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const filteredRules = useMemo(() => {
-    const rulesByPayee = TDS_RULES.filter(rule => rule.payeeType === payeeStatus);
+    let rules = TDS_RULES.filter(rule => rule.payeeType === payeeStatus);
+    
     if (payeeStatus === 'resident') {
-      return rulesByPayee.filter(rule => rule.payerType === payerCategory || rule.payerType === 'all');
+      rules = rules.filter(rule => rule.payerType === payerCategory || rule.payerType === 'all');
     }
-    return rulesByPayee;
-  }, [payeeStatus, payerCategory]);
 
-  const categories = useMemo(() => {
-    const categoryMap: { [key: string]: TdsRule[] } = {};
-    filteredRules.forEach(rule => {
-      if (!categoryMap[rule.category]) {
-        categoryMap[rule.category] = [];
-      }
-      categoryMap[rule.category].push(rule);
+    if (searchTerm) {
+      const lowerSearch = searchTerm.toLowerCase();
+      rules = rules.filter(rule => 
+        rule.description.toLowerCase().includes(lowerSearch) || 
+        rule.category.toLowerCase().includes(lowerSearch) ||
+        rule.reference?.toLowerCase().includes(lowerSearch)
+      );
+    }
+    
+    return rules.sort((a, b) => {
+      if (a.category < b.category) return -1;
+      if (a.category > b.category) return 1;
+      return a.description.localeCompare(b.description);
     });
-    return categoryMap;
-  }, [filteredRules]);
+  }, [payeeStatus, payerCategory, searchTerm]);
 
   useEffect(() => {
-    const currentRuleExists = filteredRules.some(rule => rule.id === selectedRuleId);
-    if ((!currentRuleExists && filteredRules.length > 0) || (payeeStatus === 'non-resident' && selectedRuleId === '')) {
-      setSelectedRuleId(filteredRules[0]?.id || '');
-    } else if (filteredRules.length === 0) {
-      setSelectedRuleId('');
-    }
-  }, [payeeStatus, payerCategory, filteredRules, selectedRuleId]);
-  
-  const handlePayeeStatusChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPayeeStatus(e.target.value as 'resident' | 'non-resident');
-    setResult(null);
-    setAmount('');
-  };
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
-  const handlePayerCategoryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPayerCategory(e.target.value as 'specified' | 'non-specified');
-    setResult(null);
-  };
-  
+  const selectedRule = useMemo(() => 
+    TDS_RULES.find(r => r.id === selectedRuleId), 
+  [selectedRuleId]);
+
   const handleCalculate = (e: React.FormEvent) => {
     e.preventDefault();
     const numericAmount = parseFloat(amount);
-    if (isNaN(numericAmount) || numericAmount <= 0) {
+    if (isNaN(numericAmount) || numericAmount < 0 || !selectedRule) {
       setResult(null);
       return;
     }
 
-    const rule = TDS_RULES.find(r => r.id === selectedRuleId);
-    if (!rule) return;
-    
-    if (rule.isComplex) {
-      setResult({
-        tdsAmount: 0,
-        payableAmount: numericAmount,
-        ruleApplied: rule,
-        isAboveThreshold: true,
-      });
-      return;
-    }
-
     let tdsAmount = 0;
-    const isAboveThreshold = numericAmount > rule.threshold;
-
-    if (isAboveThreshold) {
-      tdsAmount = (numericAmount * rule.rate) / 100;
+    const threshold = selectedRule.threshold;
+    
+    // Check threshold logic
+    if (numericAmount > threshold) {
+      // For Purchase of Goods (8-ii), TDS is on amount EXCEEDING threshold
+      if (selectedRule.id === 'r_8_ii_goods') {
+        tdsAmount = ((numericAmount - threshold) * selectedRule.rate) / 100;
+      } else {
+        // Standard behavior: if exceeds, tax on full amount (most sections)
+        tdsAmount = (numericAmount * selectedRule.rate) / 100;
+      }
     }
 
     setResult({
       tdsAmount,
       payableAmount: numericAmount - tdsAmount,
-      ruleApplied: rule,
-      isAboveThreshold,
+      ruleApplied: selectedRule,
+      isAboveThreshold: numericAmount > threshold,
     });
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="bg-white p-6 md:p-10 rounded-2xl shadow-lg border border-gray-200">
-        <h2 className="text-2xl md:text-3xl font-bold text-center text-gray-800 mb-8">Calculate Tax Deducted at Source</h2>
-        <form onSubmit={handleCalculate} className="space-y-6">
-          
-          <div>
-            <label className="block text-lg font-medium text-gray-700 mb-2">Payee Status</label>
-            <div className="flex items-center space-x-6 bg-gray-50 p-3 rounded-lg border">
-              <label className="flex items-center cursor-pointer">
-                <input
-                  type="radio"
-                  value="resident"
-                  checked={payeeStatus === 'resident'}
-                  onChange={handlePayeeStatusChange}
-                  className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                />
-                <span className="ml-3 text-gray-700">Resident</span>
+    <div className="max-w-4xl mx-auto px-2 pb-20">
+      <div className="bg-white p-6 md:p-10 rounded-3xl shadow-xl border border-gray-100">
+        <div className="mb-10 text-center">
+          <h2 className="text-3xl font-extrabold text-gray-900 mb-2">Comprehensive TDS Engine</h2>
+          <p className="text-gray-500 font-medium">All payment categories under Sec 393 (Income Tax Act 2025)</p>
+        </div>
+        
+        <form onSubmit={handleCalculate} className="space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-3">
+              <label className="text-sm font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2">
+                <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                Recipient Status
               </label>
-              <label className="flex items-center cursor-pointer">
-                <input
-                  type="radio"
-                  value="non-resident"
-                  checked={payeeStatus === 'non-resident'}
-                  onChange={handlePayeeStatusChange}
-                  className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                />
-                <span className="ml-3 text-gray-700">Non-Resident</span>
-              </label>
-            </div>
-          </div>
-          
-          {payeeStatus === 'resident' && (
-            <div>
-              <label className="block text-lg font-medium text-gray-700 mb-2">
-                Payer Category
-                <div className="relative inline-block ml-2 group">
-                  <span className="cursor-pointer text-blue-500">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 inline-block" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                    </svg>
-                  </span>
-                  <div className="absolute bottom-full mb-2 w-80 bg-gray-800 text-white text-sm rounded-lg p-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10 -translate-x-1/2 left-1/2">
-                    As per Sec 402(37), a "Specified Person" is: (a) any person, not being an individual or HUF; or (b) an individual or HUF with sales/turnover &gt; ₹1 crore (business) or gross receipts &gt; ₹50 lakh (profession) in the preceding financial year.
-                    <svg className="absolute text-gray-800 h-2 w-full left-0 top-full" x="0px" y="0px" viewBox="0 0 255 255"><polygon className="fill-current" points="0,0 127.5,127.5 255,0"/></svg>
-                  </div>
-                </div>
-              </label>
-              <div className="flex items-center space-x-6 bg-gray-50 p-3 rounded-lg border">
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="radio"
-                    value="specified"
-                    checked={payerCategory === 'specified'}
-                    onChange={handlePayerCategoryChange}
-                    className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                  />
-                  <span className="ml-3 text-gray-700">Specified Person</span>
-                </label>
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="radio"
-                    value="non-specified"
-                    checked={payerCategory === 'non-specified'}
-                    onChange={handlePayerCategoryChange}
-                    className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                  />
-                  <span className="ml-3 text-gray-700">Other</span>
-                </label>
+              <div className="grid grid-cols-2 p-1 bg-gray-100 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => { setPayeeStatus('resident'); setSelectedRuleId(''); setResult(null); }}
+                  className={`py-2 px-4 rounded-lg text-sm font-bold transition-all ${payeeStatus === 'resident' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Resident
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setPayeeStatus('non-resident'); setSelectedRuleId(''); setResult(null); }}
+                  className={`py-2 px-4 rounded-lg text-sm font-bold transition-all ${payeeStatus === 'non-resident' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Non-Resident
+                </button>
               </div>
             </div>
-          )}
 
-
-          <div>
-            <label htmlFor="paymentType" className="block text-lg font-medium text-gray-700 mb-2">
-              Type of Payment
-            </label>
-            <select
-              id="paymentType"
-              value={selectedRuleId}
-              onChange={(e) => {
-                setSelectedRuleId(e.target.value);
-                setResult(null);
-              }}
-              className="w-full p-4 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-              disabled={!filteredRules.length}
-            >
-              {filteredRules.length > 0 ? (
-                Object.keys(categories).map(category => (
-                  <optgroup label={category} key={category}>
-                    {categories[category].map(rule => (
-                      <option key={rule.id} value={rule.id}>
-                        {rule.description}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))
-              ) : (
-                <option>No payment types available for this selection.</option>
-              )}
-            </select>
+            {payeeStatus === 'resident' && (
+              <div className="space-y-3 animate-fade-in">
+                <label className="text-sm font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2">
+                  <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                  Payer Category
+                </label>
+                <div className="grid grid-cols-2 p-1 bg-gray-100 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => { setPayerCategory('specified'); setSelectedRuleId(''); setResult(null); }}
+                    className={`py-2 px-4 rounded-lg text-sm font-bold transition-all ${payerCategory === 'specified' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    Specified
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setPayerCategory('non-specified'); setSelectedRuleId(''); setResult(null); }}
+                    className={`py-2 px-4 rounded-lg text-sm font-bold transition-all ${payerCategory === 'non-specified' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    Other
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div>
-            <label htmlFor="amount" className="block text-lg font-medium text-gray-700 mb-2">
-              Total Amount Payable (INR)
-            </label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-gray-500 text-lg">₹</span>
+          <div className="space-y-3">
+            <label className="text-sm font-bold text-gray-700 uppercase tracking-wider">Payment Nature & Act Section</label>
+            <div className="relative" ref={dropdownRef}>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </span>
+                <input
+                  type="text"
+                  placeholder="Search Immovable Property, Rent, Winners, Royalty..."
+                  className="w-full pl-11 pr-10 py-4 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-gray-800"
+                  value={searchTerm || (selectedRule ? selectedRule.description : '')}
+                  onFocus={() => { setIsDropdownOpen(true); }}
+                  onChange={(e) => { setSearchTerm(e.target.value); setIsDropdownOpen(true); }}
+                />
+                {(searchTerm || selectedRule) && (
+                  <button 
+                    type="button"
+                    onClick={() => { setSearchTerm(''); setSelectedRuleId(''); setResult(null); }}
+                    className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              {isDropdownOpen && (
+                <div className="absolute z-50 w-full mt-2 bg-white border border-gray-200 rounded-2xl shadow-2xl max-h-[450px] overflow-y-auto">
+                  {filteredRules.length > 0 ? (
+                    filteredRules.map((rule, idx) => {
+                      const showHeader = idx === 0 || filteredRules[idx - 1].category !== rule.category;
+                      return (
+                        <React.Fragment key={rule.id}>
+                          {showHeader && (
+                            <div className="bg-gray-50 px-5 py-2 text-[10px] font-black text-blue-400 uppercase tracking-widest border-b border-gray-100 sticky top-0 z-10">
+                              {rule.category}
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            className={`w-full text-left px-5 py-4 hover:bg-blue-50 border-b border-gray-50 last:border-0 transition-colors group ${selectedRuleId === rule.id ? 'bg-blue-50' : ''}`}
+                            onClick={() => {
+                              setSelectedRuleId(rule.id);
+                              setSearchTerm('');
+                              setIsDropdownOpen(false);
+                              setResult(null);
+                            }}
+                          >
+                            <div className="flex justify-between items-start gap-4">
+                              <div className="flex-1">
+                                <p className={`font-bold text-sm ${selectedRuleId === rule.id ? 'text-blue-700' : 'text-gray-900'}`}>
+                                  {rule.description}
+                                </p>
+                                <p className="text-[10px] text-gray-400 font-bold mt-1">{rule.reference}</p>
+                              </div>
+                              <div className="flex flex-col items-end">
+                                <span className="bg-white border border-gray-200 text-gray-700 text-[10px] font-black px-2 py-0.5 rounded shadow-sm">
+                                  {rule.rate}%
+                                </span>
+                                {rule.threshold > 0 && (
+                                  <span className="text-[9px] text-gray-400 mt-1 font-medium">
+                                    Limit: ₹{(rule.threshold).toLocaleString()}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                        </React.Fragment>
+                      );
+                    })
+                  ) : (
+                    <div className="px-5 py-12 text-center text-gray-500">
+                      No results for "{searchTerm}". Try general terms like "Transfer" or "Sale".
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label htmlFor="amount" className="text-sm font-bold text-gray-700 uppercase tracking-wider">Gross Payment / Transaction Amount (INR)</label>
+            <div className="relative group">
+              <span className="absolute inset-y-0 left-0 pl-5 flex items-center text-gray-300 text-xl font-light">₹</span>
               <input
                 type="number"
                 id="amount"
                 value={amount}
-                onChange={(e) => {
-                    setAmount(e.target.value);
-                    setResult(null);
-                }}
-                placeholder="e.g., 60000"
-                className="w-full p-4 pl-8 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-lg"
+                onChange={(e) => { setAmount(e.target.value); setResult(null); }}
+                placeholder="0.00"
+                className="w-full p-5 pl-10 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-2xl font-black text-gray-900"
                 step="0.01"
-                min="0"
               />
             </div>
           </div>
 
-          <div className="pt-4">
-            <button
-              type="submit"
-              className="w-full bg-blue-600 text-white font-bold py-4 px-6 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 transition-transform transform hover:scale-105"
-              disabled={!selectedRuleId || !amount}
-            >
-              Calculate TDS
-            </button>
-          </div>
+          <button
+            type="submit"
+            className="w-full bg-blue-600 text-white font-black py-5 px-6 rounded-2xl hover:bg-blue-700 shadow-xl shadow-blue-100 transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50"
+            disabled={!selectedRuleId || !amount}
+          >
+            CALCULATE TAX DEDUCTION
+          </button>
         </form>
       </div>
 
