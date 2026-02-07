@@ -61,13 +61,16 @@ const TdsCalculator: React.FC = () => {
     let tdsAmount = 0;
     const threshold = selectedRule.threshold;
     
-    // Check threshold logic
     if (numericAmount > threshold) {
-      // For Purchase of Goods (8-ii), TDS is on amount EXCEEDING threshold
-      if (selectedRule.id === 'r_8_ii_goods') {
+      // For items where TDS is only on the amount EXCEEDING the threshold:
+      // 8-ii (Legacy 194Q - Purchase of Goods)
+      // 12 (Legacy 194N - Cash Withdrawal)
+      const excessThresholdIds = ['r_393_1_8_ii', 'r_393_1_12'];
+      
+      if (excessThresholdIds.includes(selectedRule.id)) {
         tdsAmount = ((numericAmount - threshold) * selectedRule.rate) / 100;
       } else {
-        // Standard behavior: if exceeds, tax on full amount (most sections)
+        // Standard rule: If total exceeds threshold, tax is on the FULL amount
         tdsAmount = (numericAmount * selectedRule.rate) / 100;
       }
     }
@@ -84,8 +87,8 @@ const TdsCalculator: React.FC = () => {
     <div className="max-w-4xl mx-auto px-2 pb-20">
       <div className="bg-white p-6 md:p-10 rounded-3xl shadow-xl border border-gray-100">
         <div className="mb-10 text-center">
-          <h2 className="text-3xl font-extrabold text-gray-900 mb-2">Comprehensive TDS Engine</h2>
-          <p className="text-gray-500 font-medium">All payment categories under Sec 393 (Income Tax Act 2025)</p>
+          <h2 className="text-3xl font-extrabold text-gray-900 mb-2">Detailed TDS Engine</h2>
+          <p className="text-gray-500 font-medium">Fully exhaustive list of categories under Sec 393 (2025 Act)</p>
         </div>
         
         <form onSubmit={handleCalculate} className="space-y-8">
@@ -144,7 +147,7 @@ const TdsCalculator: React.FC = () => {
           </div>
 
           <div className="space-y-3">
-            <label className="text-sm font-bold text-gray-700 uppercase tracking-wider">Payment Nature & Act Section</label>
+            <label className="text-sm font-bold text-gray-700 uppercase tracking-wider">Payment Nature (Search Section e.g. 194C, 194J...)</label>
             <div className="relative" ref={dropdownRef}>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -154,7 +157,7 @@ const TdsCalculator: React.FC = () => {
                 </span>
                 <input
                   type="text"
-                  placeholder="Search Immovable Property, Rent, Winners, Royalty..."
+                  placeholder="Type section (194C, 194J) or payment type (Contract, Rent...)"
                   className="w-full pl-11 pr-10 py-4 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-gray-800"
                   value={searchTerm || (selectedRule ? selectedRule.description : '')}
                   onFocus={() => { setIsDropdownOpen(true); }}
@@ -219,7 +222,7 @@ const TdsCalculator: React.FC = () => {
                     })
                   ) : (
                     <div className="px-5 py-12 text-center text-gray-500">
-                      No results for "{searchTerm}". Try general terms like "Transfer" or "Sale".
+                      No results found. Try searching by Section Number (e.g. 194C).
                     </div>
                   )}
                 </div>
