@@ -5,21 +5,17 @@ import ResultCard from './ResultCard';
 
 const TdsCalculator: React.FC = () => {
   const [payeeStatus, setPayeeStatus] = useState<'resident' | 'non-resident'>('resident');
-  const [payerCategory, setPayerCategory] = useState<'specified' | 'non-specified'>('specified');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedRuleId, setSelectedRuleId] = useState<string>('');
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [amount, setAmount] = useState<string>('');
+  const [isNonFiler, setIsNonFiler] = useState<boolean>(false);
   const [result, setResult] = useState<CalculationResult | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const filteredRules = useMemo(() => {
     let rules = TDS_RULES.filter(rule => rule.payeeType === payeeStatus);
     
-    if (payeeStatus === 'resident') {
-      rules = rules.filter(rule => rule.payerType === payerCategory || rule.payerType === 'all');
-    }
-
     if (searchTerm) {
       const lowerSearch = searchTerm.toLowerCase();
       rules = rules.filter(rule => 
@@ -34,7 +30,7 @@ const TdsCalculator: React.FC = () => {
       if (a.category > b.category) return 1;
       return a.description.localeCompare(b.description);
     });
-  }, [payeeStatus, payerCategory, searchTerm]);
+  }, [payeeStatus, searchTerm]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -62,15 +58,27 @@ const TdsCalculator: React.FC = () => {
     const threshold = selectedRule.threshold;
     
     if (numericAmount > threshold) {
-      // For items where TDS is only on the amount EXCEEDING the threshold:
-      // 8-ii (Legacy 194Q - Purchase of Goods)
-      // 12 (Legacy 194N - Cash Withdrawal)
-      const excessThresholdIds = ['r_393_1_8_ii', 'r_393_1_12'];
-      
-      if (excessThresholdIds.includes(selectedRule.id)) {
-        tdsAmount = ((numericAmount - threshold) * selectedRule.rate) / 100;
+      // Specialized logic based on the charts
+      if (selectedRule.id === 'r_194N_cash') {
+        if (isNonFiler) {
+          // Tiered: 2% (20L - 1Cr), 5% (> 1Cr)
+          if (numericAmount > 10000000) {
+            tdsAmount = (8000000 * 0.02) + ((numericAmount - 10000000) * 0.05);
+          } else if (numericAmount > 2000000) {
+            tdsAmount = (numericAmount - 2000000) * 0.02;
+          }
+        } else {
+          // Standard: 2% above 1 Crore
+          tdsAmount = (numericAmount - 10000000) * 0.02;
+        }
+      } else if (selectedRule.id === 'r_194Q_goods') {
+        // TDS only on amount exceeding 50 Lakh
+        tdsAmount = (numericAmount - 5000000) * (selectedRule.rate / 100);
+      } else if (selectedRule.id === 'nr_195_d_ltcg_112a') {
+        // Section 112A Non-Resident: Tax on gain exceeding 1.25 Lakhs
+        tdsAmount = (numericAmount - 125000) * (selectedRule.rate / 100);
       } else {
-        // Standard rule: If total exceeds threshold, tax is on the FULL amount
+        // Standard rule: Tax on FULL amount if threshold exceeded
         tdsAmount = (numericAmount * selectedRule.rate) / 100;
       }
     }
@@ -79,7 +87,7 @@ const TdsCalculator: React.FC = () => {
       tdsAmount,
       payableAmount: numericAmount - tdsAmount,
       ruleApplied: selectedRule,
-      isAboveThreshold: numericAmount > threshold,
+      isAboveThreshold: numericAmount > (selectedRule.id === 'r_194N_cash' && isNonFiler ? 2000000 : threshold),
     });
   };
 
@@ -87,18 +95,15 @@ const TdsCalculator: React.FC = () => {
     <div className="max-w-4xl mx-auto px-2 pb-20">
       <div className="bg-white p-6 md:p-10 rounded-3xl shadow-xl border border-gray-100">
         <div className="mb-10 text-center">
-          <h2 className="text-3xl font-extrabold text-gray-900 mb-2">Detailed TDS Engine</h2>
-          <p className="text-gray-500 font-medium">Fully exhaustive list of categories under Sec 393 (2025 Act)</p>
+          <h2 className="text-3xl font-extrabold text-gray-900 mb-2">Non-Resident TDS Engine</h2>
+          <p className="text-gray-500 font-medium">Verified rates for Non-Residents & Residents (2025 Act)</p>
         </div>
         
         <form onSubmit={handleCalculate} className="space-y-8">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-3">
               <label className="text-sm font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2">
-                <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                Recipient Status
+                Payee Status
               </label>
               <div className="grid grid-cols-2 p-1 bg-gray-100 rounded-xl">
                 <button
@@ -118,28 +123,25 @@ const TdsCalculator: React.FC = () => {
               </div>
             </div>
 
-            {payeeStatus === 'resident' && (
+            {selectedRuleId === 'r_194N_cash' && (
               <div className="space-y-3 animate-fade-in">
                 <label className="text-sm font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2">
-                  <svg className="w-4 h-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                  </svg>
-                  Payer Category
+                  ITR Filer Status
                 </label>
                 <div className="grid grid-cols-2 p-1 bg-gray-100 rounded-xl">
                   <button
                     type="button"
-                    onClick={() => { setPayerCategory('specified'); setSelectedRuleId(''); setResult(null); }}
-                    className={`py-2 px-4 rounded-lg text-sm font-bold transition-all ${payerCategory === 'specified' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    onClick={() => { setIsNonFiler(false); setResult(null); }}
+                    className={`py-2 px-4 rounded-lg text-sm font-bold transition-all ${!isNonFiler ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                   >
-                    Specified
+                    Filer
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setPayerCategory('non-specified'); setSelectedRuleId(''); setResult(null); }}
-                    className={`py-2 px-4 rounded-lg text-sm font-bold transition-all ${payerCategory === 'non-specified' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    onClick={() => { setIsNonFiler(true); setResult(null); }}
+                    className={`py-2 px-4 rounded-lg text-sm font-bold transition-all ${isNonFiler ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                   >
-                    Other
+                    Non-Filer
                   </button>
                 </div>
               </div>
@@ -147,7 +149,7 @@ const TdsCalculator: React.FC = () => {
           </div>
 
           <div className="space-y-3">
-            <label className="text-sm font-bold text-gray-700 uppercase tracking-wider">Payment Nature (Search Section e.g. 194C, 194J...)</label>
+            <label className="text-sm font-bold text-gray-700 uppercase tracking-wider">Nature of Payment (Search Section or Type...)</label>
             <div className="relative" ref={dropdownRef}>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -157,7 +159,7 @@ const TdsCalculator: React.FC = () => {
                 </span>
                 <input
                   type="text"
-                  placeholder="Type section (194C, 194J) or payment type (Contract, Rent...)"
+                  placeholder={payeeStatus === 'resident' ? "194C, 194J, Rent..." : "195, 194E, LTCG, IFSC..."}
                   className="w-full pl-11 pr-10 py-4 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-gray-800"
                   value={searchTerm || (selectedRule ? selectedRule.description : '')}
                   onFocus={() => { setIsDropdownOpen(true); }}
@@ -207,7 +209,7 @@ const TdsCalculator: React.FC = () => {
                               </div>
                               <div className="flex flex-col items-end">
                                 <span className="bg-white border border-gray-200 text-gray-700 text-[10px] font-black px-2 py-0.5 rounded shadow-sm">
-                                  {rule.rate}%
+                                  {rule.rate > 0 ? `${rule.rate}%` : 'Slab'}
                                 </span>
                                 {rule.threshold > 0 && (
                                   <span className="text-[9px] text-gray-400 mt-1 font-medium">
@@ -222,7 +224,7 @@ const TdsCalculator: React.FC = () => {
                     })
                   ) : (
                     <div className="px-5 py-12 text-center text-gray-500">
-                      No results found. Try searching by Section Number (e.g. 194C).
+                      No matching sections found for {payeeStatus === 'resident' ? 'Residents' : 'Non-Residents'}.
                     </div>
                   )}
                 </div>
@@ -231,7 +233,7 @@ const TdsCalculator: React.FC = () => {
           </div>
 
           <div className="space-y-3">
-            <label htmlFor="amount" className="text-sm font-bold text-gray-700 uppercase tracking-wider">Gross Payment / Transaction Amount (INR)</label>
+            <label htmlFor="amount" className="text-sm font-bold text-gray-700 uppercase tracking-wider">Payment Amount (INR)</label>
             <div className="relative group">
               <span className="absolute inset-y-0 left-0 pl-5 flex items-center text-gray-300 text-xl font-light">₹</span>
               <input
@@ -251,7 +253,7 @@ const TdsCalculator: React.FC = () => {
             className="w-full bg-blue-600 text-white font-black py-5 px-6 rounded-2xl hover:bg-blue-700 shadow-xl shadow-blue-100 transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50"
             disabled={!selectedRuleId || !amount}
           >
-            CALCULATE TAX DEDUCTION
+            CALCULATE TDS AMOUNT
           </button>
         </form>
       </div>
